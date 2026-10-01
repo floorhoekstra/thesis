@@ -1,0 +1,133 @@
+import os
+import glob
+import sys
+import time
+import numpy as np
+import geopandas as gpd
+
+from tree_processing.models import CrownGrowthModel
+from tree_processing.separation import FoxTree
+
+def process_file(input_path, output_path, radius, v_res, min_pts, municipal_trees_path=None, ref_excel_path=None, growth_model=None):
+    """
+    Handles loading, processing, and saving for a single file with timing.
+    """
+    file_start_time = time.time()
+
+    # 1. Load Data
+    try:
+        t_load_start = time.time()
+        # Load XYZ data
+        points = np.loadtxt(input_path, usecols=(0, 1, 2))
+        t_load_end = time.time()
+    except Exception as e:
+        print(f"Error loading data from {input_path}: {e}")
+        return
+
+    if points.size == 0:
+        print(f"Point cloud in {input_path} is empty or invalid.")
+        return
+
+    muni_trees = None
+    if municipal_trees_path and os.path.exists(municipal_trees_path):
+        try:
+            # Lees het GeoPackage bestand in met GeoPandas
+            muni_trees = gpd.read_file(municipal_trees_path)
+            
+            # Zet de X en Y coördinaten om naar een NumPy array
+            # muni_trees = np.column_stack((gdf.geometry.x, gdf.geometry.y))
+            print(f"Succesvol {len(muni_trees)} gemeentebomen ingeladen uit .gpkg!")
+        except Exception as e:
+            print(f"Fout bij het inladen van gemeentebomen .gpkg ({municipal_trees_path}): {e}")
+
+    growth_model = CrownGrowthModel(ref_excel_path) if ref_excel_path else None
+
+    print(f"\nProcessing: {os.path.basename(input_path)}")
+    print(f"Loaded {len(points)} points.")
+    print(f"  [Time] Data Loading: {t_load_end - t_load_start:.4f} sec")
+
+    # 2. Initialization & Separation
+    t_process_start = time.time()
+    fox_tree = FoxTree(points, radius, v_res, min_pts, municipal_trees=muni_trees, growth_model=growth_model)
+    fox_tree.separate_trees()
+    t_process_end = time.time()
+    
+    # 3. Output
+    t_write_start = time.time()
+    fox_tree.output_trees(output_path)
+    fox_tree.output_tree_polygons(output_path.replace('.xyz', '_polygons.gpkg'))
+    t_write_end = time.time()
+    
+    file_end_time = time.time()
+
+    print(f"\n--- Timing Summary for {os.path.basename(input_path)} ---")
+    print(f"  Data Loading:      {t_load_end - t_load_start:.4f} sec")
+    print(f"  Tree Separation:   {t_process_end - t_process_start:.4f} sec")
+    print(f"  Writing Output:    {t_write_end - t_write_start:.4f} sec")
+    print(f"  Total File Time:   {file_end_time - file_start_time:.4f} sec")
+    print("---------------------------------------------------------")
+
+
+if __name__ == "__main__":
+    # =========================================================
+    #                    USER PARAMETERS
+    # =========================================================
+    
+    # Directory settings
+    INPUT_DIR_NAME = "Input"
+    OUTPUT_DIR_NAME = "Output"
+    MUNICIPAL_TREES_FILE = "bomen_denhaag_clipped.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
+    REF_EXCEL_PATH = "growth_parameters_iTree.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
+    
+    # Algorithm parameters
+    RADIUS = 2.0              # Search radius
+    VERTICAL_RESOLUTION = 0.7 # Vertical slice resolution
+    MIN_PTS_PER_CLUSTER = 3   # Minimum points to form a tree seed
+    
+    # =========================================================
+    #                   MAIN EXECUTION
+    # =========================================================
+    
+    batch_start_time = time.time()
+
+    # 1. Setup paths
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    input_dir = os.path.join(script_dir, INPUT_DIR_NAME)
+    output_dir = os.path.join(script_dir, OUTPUT_DIR_NAME)
+    
+    # 2. Check Input Directory
+    if not os.path.exists(input_dir):
+        print(f"Error: Input directory '{INPUT_DIR_NAME}' not found at {input_dir}")
+        sys.exit(1)
+        
+    # 3. Create Output Directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir)
+        
+    # 4. Find all .xyz files
+    xyz_files = glob.glob(os.path.join(input_dir, "*.xyz"))
+    
+    if not xyz_files:
+        print(f"No .xyz files found in {input_dir}")
+        sys.exit(0)
+        
+    print(f"Found {len(xyz_files)} files to process.")
+    
+    # 5. Process loop
+    for file_path in xyz_files:
+        base_name = os.path.basename(file_path)
+        name_root, ext = os.path.splitext(base_name)
+        
+        # Skip output files if they accidentally ended up in input folder
+        if f"_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}" in name_root:
+            continue
+
+        # Construct output filename: name_radius_res_minpts.xyz
+        out_filename = f"{name_root}_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}{ext}"
+        out_full_path = os.path.join(output_dir, out_filename)
+        
+        process_file(file_path, out_full_path, RADIUS, VERTICAL_RESOLUTION, MIN_PTS_PER_CLUSTER, municipal_trees_path=os.path.join(input_dir, MUNICIPAL_TREES_FILE), ref_excel_path=os.path.join(input_dir, REF_EXCEL_PATH), growth_model=None)
+        
+    batch_end_time = time.time()
+    print(f"\nAll tasks completed in {batch_end_time - batch_start_time:.4f} seconds.")
