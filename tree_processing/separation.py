@@ -428,6 +428,7 @@ class FoxTree:
                     calc_cd = self.growth_model.calculate_crown_diameter(scientific_name, age)
 
                 calc_cv = self.growth_model.calculate_crown_volume(round(2 * np.sqrt(hull.area / np.pi), 2), tree_height) if self.growth_model else None
+                calc_agb = self.growth_model.calculate_agb(round(hull.area, 2), tree_height) if self.growth_model else None
 
                 measured_cv = self.growth_model.measure_crown_volume(self.points_data[indices]) if self.growth_model else None
 
@@ -442,6 +443,7 @@ class FoxTree:
                     "model_cd_m": calc_cd,
                     "measured_cv_m3": measured_cv,
                     "model_cv_m3": calc_cv,
+                    "model_agb_t": calc_agb,
                     "is_municipal": is_municipal
                 }
 
@@ -466,6 +468,7 @@ class FoxTree:
                 model_cd = record.get("model_cd_m", None)
                 # Assuming height is not available for unlinked municipal trees, we can set it to None
                 record["model_cv_m3"] = self.growth_model.calculate_crown_volume(model_cd, None)
+                record["model_agb_t"] = self.growth_model.calculate_agb(round(np.pi * (model_cd / 2) ** 2, 2), None) if model_cd else None
         all_records.extend(unlinked_records)
 
         if not all_records:

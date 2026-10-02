@@ -166,4 +166,21 @@ class CrownGrowthModel:
 
         except Exception:
             return 0.0
+
+    def calculate_agb(self, ca, height):
+        """
+        Berekent AGB (Above Ground Biomass) op basis van de formule:
+        AGB = e^{3.0863} * (CA * H)^{0.8127}
+        waarbij CA = kroonoppervlakte en H = hoogte van de boom.
+        """
+        import numpy as np
+        
+        if ca is None or height is None or pd.isna(ca) or pd.isna(height):
+            return None
+        
+        try:
+            agb = np.exp(3.0863) * (ca * height) ** 0.8127
+            return max(0.0, round(agb, 2))  # AGB mag niet negatief zijn
+        except Exception:
+            return None
         
