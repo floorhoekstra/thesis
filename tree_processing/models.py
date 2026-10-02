@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+from shapely import points
 
 
 class CrownGrowthModel:
@@ -117,3 +118,52 @@ class CrownGrowthModel:
             return max(0.0, round(cd_bounded, 2))  # Kroondiameter mag niet negatief zijn
         except Exception:
             return None
+
+    def calculate_crown_volume(self, cd, height):
+        """
+        Berekent het kroondiametervolume (Crown Volume) op basis van de formule:
+        Crown Volume = (1/3) * π * (CD/2)^2 * H
+        waarbij CD = kroondiameter en H = hoogte van de boom.
+        """
+        if cd is None or height is None or pd.isna(cd) or pd.isna(height):
+            return None
+        
+        try:
+            radius = cd / 2.0
+            volume = (1/3) * 3.14159 * (radius ** 2) * height
+            return max(0.0, round(volume, 2))  # Volume mag niet negatief zijn
+        except Exception:
+            return None
+
+    def measure_crown_volume(self, points):
+        """
+        Meet het kroonvolume op basis van een 3D Alpha Shape.
+        """
+        import alphashape
+        import numpy as np
+
+        # Unieke punten filteren
+        unique_points = np.unique(points, axis=0)
+
+        if len(unique_points) < 4:
+            return 0.0
+
+        # Vaste alpha (bijv. 0.5 tot 1.5 afhankelijk van je puntendichtheid)
+        # Je kunt alphashape ook zelf de optimale alpha laten zoeken via: alphashape.alphashape(unique_points)
+        alpha = 0.8  
+
+        try:
+            alpha_shape = alphashape.alphashape(unique_points, alpha)
+
+            # Controleer of het resultaat een echt 3D volume (Mesh) is
+            if hasattr(alpha_shape, 'volume'):
+                return max(0.0, round(alpha_shape.volume, 2))
+            else:
+                # Fallback: als alpha te hoog was, is de vorm opgesplitst in platte vlakken
+                # We proberen het met een lossere alpha (convex hull equivalent = 0.0)
+                fallback_shape = alphashape.alphashape(unique_points, 0.0)
+                return max(0.0, round(fallback_shape.volume, 2))
+
+        except Exception:
+            return 0.0
+        

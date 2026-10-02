@@ -427,6 +427,10 @@ class FoxTree:
                 if self.growth_model and scientific_name:
                     calc_cd = self.growth_model.calculate_crown_diameter(scientific_name, age)
 
+                calc_cv = self.growth_model.calculate_crown_volume(round(2 * np.sqrt(hull.area / np.pi), 2), tree_height) if self.growth_model else None
+
+                measured_cv = self.growth_model.measure_crown_volume(self.points_data[indices]) if self.growth_model else None
+
                 base_info = {
                     "tree_id": int(t_id),
                     "num_points": int(len(indices)),
@@ -436,6 +440,8 @@ class FoxTree:
                     "age_years": age,
                     "measured_cd_m": round(2 * np.sqrt(hull.area / np.pi), 2),
                     "model_cd_m": calc_cd,
+                    "measured_cv_m3": measured_cv,
+                    "model_cv_m3": calc_cv,
                     "is_municipal": is_municipal
                 }
 
@@ -454,6 +460,12 @@ class FoxTree:
 
         # 2. Voeg niet-gekoppelde gemeentebomen toe als ronde modelcirkels
         unlinked_records = self.get_unlinked_municipal_polygons(default_radius=2.0)
+        #calculate volume for unlinked municipal trees if growth model is available
+        if self.growth_model:
+            for record in unlinked_records:
+                model_cd = record.get("model_cd_m", None)
+                # Assuming height is not available for unlinked municipal trees, we can set it to None
+                record["model_cv_m3"] = self.growth_model.calculate_crown_volume(model_cd, None)
         all_records.extend(unlinked_records)
 
         if not all_records:
