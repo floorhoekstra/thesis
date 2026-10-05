@@ -51,8 +51,13 @@ def process_file(input_path, output_path, radius, v_res, min_pts, municipal_tree
     fox_tree = FoxTree(points, radius, v_res, min_pts, municipal_trees=muni_trees, growth_model=growth_model)
     fox_tree.separate_trees()
     t_process_end = time.time()
-    
-    # 3. Output
+
+    # 3. Visualize a few sample trees
+    sample_tree_ids = list(fox_tree.trees.keys())[:3]
+    for t_id in sample_tree_ids:
+        fox_tree.visualize_tree(tree_id=t_id, alpha=0.8)
+        
+    # 4. Output
     t_write_start = time.time()
     fox_tree.output_trees(output_path)
     fox_tree.output_tree_polygons(output_path.replace('.xyz', '_polygons.gpkg'))
@@ -131,3 +136,5 @@ if __name__ == "__main__":
         
     batch_end_time = time.time()
     print(f"\nAll tasks completed in {batch_end_time - batch_start_time:.4f} seconds.")
+
+    

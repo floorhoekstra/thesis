@@ -479,3 +479,52 @@ class FoxTree:
         gdf = gpd.GeoDataFrame(all_records, crs=crs)
         gdf.to_file(filename, driver="GPKG")
         print(f"Succesvol {len(gdf)} polygonen opgeslagen in {filename}!")
+
+    def visualize_tree(self, tree_id, alpha=0.8):
+        """
+        Visualiseert de 3D Alpha Shape en puntenwolk van één specifieke boom.
+        """
+        import alphashape
+        import numpy as np
+        import pyvista as pv
+
+        if tree_id not in self.trees:
+            print(f"Boom ID {tree_id} niet gevonden!")
+            return
+
+        # Haal de punten van de specifieke boom op
+        indices = self.trees[tree_id]
+        tree_points = self.points_data[indices]
+        unique_points = np.unique(tree_points, axis=0)
+
+        if len(unique_points) < 4:
+            print(f"Boom {tree_id} heeft te weinig unieke punten ({len(unique_points)}) voor een 3D mesh.")
+            return
+
+        # Bereken de Alpha Shape
+        alpha_shape = alphashape.alphashape(unique_points, alpha)
+        if not hasattr(alpha_shape, 'volume'):
+            print(f"Alpha {alpha} was te hoog, fallback naar Convex Hull (alpha=0.0)...")
+            alpha_shape = alphashape.alphashape(unique_points, 0.0)
+
+        volume = round(alpha_shape.volume, 2)
+        print(f"Visualiseren van Boom {tree_id} - Berekend Volume: {volume} m³")
+
+        # PyVista Plotter
+        plotter = pv.Plotter(window_size=[1024, 768])
+        plotter.add_title(f"Tree ID: {tree_id} | Volume: {volume} m³ (Alpha = {alpha})")
+
+        # Puntenwolk (Groen)
+        point_cloud = pv.PolyData(unique_points)
+        plotter.add_mesh(point_cloud, color="#2ecc71", point_size=5, render_points_as_spheres=True, label="Puntenwolk")
+
+        # Mesh van de Alpha Shape (Blauw, transparant)
+        faces = alpha_shape.faces
+        pv_faces = np.c_[np.full(len(faces), 3), faces].ravel()
+        mesh = pv.PolyData(alpha_shape.vertices, pv_faces)
+        plotter.add_mesh(mesh, color="#3498db", opacity=0.45, show_edges=True, edge_color="#1b4f72", label="3D Volume Mesh")
+
+        plotter.add_legend()
+        plotter.add_axes()
+        plotter.show_grid()
+        plotter.show()

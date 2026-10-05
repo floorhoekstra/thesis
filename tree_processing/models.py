@@ -157,12 +157,12 @@ class CrownGrowthModel:
 
             # Controleer of het resultaat een echt 3D volume (Mesh) is
             if hasattr(alpha_shape, 'volume'):
-                return max(0.0, round(alpha_shape.volume, 2))
+                return abs(round(alpha_shape.volume, 2))
             else:
                 # Fallback: als alpha te hoog was, is de vorm opgesplitst in platte vlakken
                 # We proberen het met een lossere alpha (convex hull equivalent = 0.0)
                 fallback_shape = alphashape.alphashape(unique_points, 0.0)
-                return max(0.0, round(fallback_shape.volume, 2))
+                return abs(round(fallback_shape.volume, 2))
 
         except Exception:
             return 0.0
