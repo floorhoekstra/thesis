@@ -114,7 +114,16 @@ class FoxTree:
 
                 row = self.municipal_trees.iloc[i]
                 geom = row.geometry
-                
+
+                muni_dict = {}
+                for col, val in row.items():
+                    if col == "geometry":
+                        continue
+                    # Zet NaN / None om naar None
+                    if pd.isna(val):
+                        muni_dict[col] = None
+                    else:
+                        muni_dict[col] = val
                 # Kolommen uitlezen
                 scientific_name = row.get("Boomsoort wetenschappelijk", row.get("BOOMSOORT", row.get("SPECIES", None)))
                 raw_age = row.get("Leeftijd", row.get("PLANTJAAR", row.get("PLANT_JAAR", None)))
@@ -159,10 +168,9 @@ class FoxTree:
 
                 circle_poly = geom.buffer(radius)
 
-                muni_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                muni_dict.pop('geometry', None)
+                record = dict(muni_dict)
 
-                unlinked_records.append({
+                record.update({
                     "tree_id": -1,
                     "num_points": 0,
                     "height_m": None,
@@ -175,8 +183,7 @@ class FoxTree:
                     "poly_type": "unlinked_municipal_model",
                     "geometry": circle_poly
                 })
-
-                unlinked_records.append({**muni_dict})
+                unlinked_records.append(record)
 
             print(f"Groeimodel gelukt bij {model_success_count} van de {len(unlinked_records)} niet-gekoppelde bomen.\n")
             return unlinked_records
