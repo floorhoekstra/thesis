@@ -71,6 +71,10 @@ class FoxTree:
                 self.matched_muni_indices.add(i)
                 
                 row = municipal_trees.iloc[i] if hasattr(municipal_trees, 'iloc') else {}
+
+                muni_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+
+                muni_dict.pop("geometry", None)  # Verwijder geometrie als het een GeoDataFrame is
                 
                 t_id = self.next_tree_id
                 self.next_tree_id += 1
@@ -78,7 +82,8 @@ class FoxTree:
                 self.tree_attributes[t_id] = {
                     "species_scientific": row.get("Boomsoort wetenschappelijk", row.get("BOOMSOORT", None)),
                     "age_years": row.get("Leeftijd", row.get("PLANTJAAR", None)),
-                    "is_municipal": True
+                    "is_municipal": True,
+                    "muni_attributes": muni_dict
                 }
                 
                 self.trees[t_id] = []
@@ -154,6 +159,9 @@ class FoxTree:
 
                 circle_poly = geom.buffer(radius)
 
+                muni_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                muni_dict.pop('geometry', None)
+
                 unlinked_records.append({
                     "tree_id": -1,
                     "num_points": 0,
@@ -167,6 +175,8 @@ class FoxTree:
                     "poly_type": "unlinked_municipal_model",
                     "geometry": circle_poly
                 })
+
+                unlinked_records.append({**muni_dict})
 
             print(f"Groeimodel gelukt bij {model_success_count} van de {len(unlinked_records)} niet-gekoppelde bomen.\n")
             return unlinked_records
@@ -415,6 +425,7 @@ class FoxTree:
                 tree_height = max_z - min_z
                 
                 attr = self.tree_attributes.get(t_id, {})
+                muni_attrs = attr.get("muni_attributes", {})
                 scientific_name = attr.get("species_scientific", None)
                 age = attr.get("age_years", None)
                 is_municipal = attr.get("is_municipal", False)
@@ -449,7 +460,7 @@ class FoxTree:
 
                 if is_municipal:
                     # Gekoppelde gemeenteboom: Toon gemeten AHN polygoon + soortnaam
-                    record = dict(base_info)
+                    record = {**base_info, **muni_attrs}
                     record["poly_type"] = "measured_municipal"
                     record["geometry"] = hull
                     all_records.append(record)
