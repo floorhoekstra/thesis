@@ -407,11 +407,12 @@ class FoxTree:
         except IOError as e:
             print(f"Error writing file: {e}")
 
-    def output_tree_polygons(self, filename, crs="EPSG:28992"):
+    def output_tree_polygons(self, filename, crs="EPSG:28992", alpha_2d=0.3):
         """
         Exporteert alle polygonen (gemeten, gemodelleerd en niet-gekoppeld) naar 1 GeoPackage.
         """
-        from shapely.geometry import MultiPoint, Polygon
+        from shapely.geometry import MultiPoint, Polygon, MultiPolygon
+        import alphashape
 
         print(f"Polygonen genereren en opslaan naar: {filename}...")
         all_records = []
@@ -422,10 +423,23 @@ class FoxTree:
                 continue
 
             tree_points_xy = self.points_data[indices][:, :2]
-            multi_pt = MultiPoint(tree_points_xy)
-            hull = multi_pt.convex_hull
 
-            if isinstance(hull, Polygon):
+
+            try:
+                hull = alphashape.alphashape(tree_points_xy, alpha_2d)
+                
+                # Als alpha te hoog was, valt de vorm soms uit elkaar in een MultiPolygon of GeometryCollection.
+                # Pak in dat geval de convex_hull of de grootste polygoon als fallback.
+                if isinstance(hull, MultiPolygon):
+                    hull = max(hull.geoms, key=lambda p: p.area)
+                elif not isinstance(hull, Polygon):
+                    # Fallback naar convex hull (alpha = 0)
+                    hull = MultiPoint(tree_points_xy).convex_hull
+            except Exception:
+                # Fallback bij eventuele rekenfouten
+                hull = MultiPoint(tree_points_xy).convex_hull
+
+            if isinstance(hull, Polygon) and hull.area > 0:
                 z_values = self.points_data[indices][:, 2]
                 max_z = float(np.max(z_values))
                 min_z = float(np.min(z_values))
@@ -445,9 +459,11 @@ class FoxTree:
                 if self.growth_model and scientific_name:
                     calc_cd = self.growth_model.calculate_crown_diameter(scientific_name, age)
 
-                calc_cv = self.growth_model.calculate_crown_volume(round(2 * np.sqrt(hull.area / np.pi), 2), tree_height) if self.growth_model else None
-                calc_agb = self.growth_model.calculate_agb(round(hull.area, 2), tree_height) if self.growth_model else None
+                # Kroondiameter en oppervlakte op basis van de 2D Alpha Shape polygoon
+                measured_cd = round(2 * np.sqrt(hull.area / np.pi), 2)
 
+                calc_cv = self.growth_model.calculate_crown_volume(measured_cd, tree_height) if self.growth_model else None
+                calc_agb = self.growth_model.calculate_agb(round(hull.area, 2), tree_height) if self.growth_model else None
                 measured_cv = self.growth_model.measure_crown_volume(self.points_data[indices]) if self.growth_model else None
 
                 base_info = {
@@ -457,7 +473,7 @@ class FoxTree:
                     "max_z": round(max_z, 2),
                     "species_sci": scientific_name,
                     "age_years": age,
-                    "measured_cd_m": round(2 * np.sqrt(hull.area / np.pi), 2),
+                    "measured_cd_m": measured_cd,
                     "model_cd_m": calc_cd,
                     "measured_cv_m3": measured_cv,
                     "model_cv_m3": calc_cv,
@@ -466,13 +482,12 @@ class FoxTree:
                 }
 
                 if is_municipal:
-                    # Gekoppelde gemeenteboom: Toon gemeten AHN polygoon + soortnaam
-                    record = {**base_info, **muni_attrs}
+                    record = dict(muni_attrs)
+                    record.update(base_info)
                     record["poly_type"] = "measured_municipal"
                     record["geometry"] = hull
                     all_records.append(record)
                 else:
-                    # Onbekende AHN boom
                     record = dict(base_info)
                     record["poly_type"] = "measured_ahn_tree"
                     record["geometry"] = hull
@@ -480,20 +495,13 @@ class FoxTree:
 
         # 2. Voeg niet-gekoppelde gemeentebomen toe als ronde modelcirkels
         unlinked_records = self.get_unlinked_municipal_polygons(default_radius=2.0)
-        #calculate volume for unlinked municipal trees if growth model is available
-        if self.growth_model:
-            for record in unlinked_records:
-                model_cd = record.get("model_cd_m", None)
-                # Assuming height is not available for unlinked municipal trees, we can set it to None
-                record["model_cv_m3"] = self.growth_model.calculate_crown_volume(model_cd, None)
-                record["model_agb_t"] = self.growth_model.calculate_agb(round(np.pi * (model_cd / 2) ** 2, 2), None) if model_cd else None
         all_records.extend(unlinked_records)
 
         if not all_records:
             print("Geen geldige boompolygonen gegenereerd.")
             return
 
-        # Sla alle polygonen op in 1 GeoPackage
+        # Sla op naar GeoPackage
         gdf = gpd.GeoDataFrame(all_records, crs=crs)
         gdf.to_file(filename, driver="GPKG")
         print(f"Succesvol {len(gdf)} polygonen opgeslagen in {filename}!")
