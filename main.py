@@ -85,8 +85,8 @@ if __name__ == "__main__":
     REF_EXCEL_PATH = "growth_parameters_iTree.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
     
     # Algorithm parameters
-    RADIUS = 2.0              # Search radius
-    VERTICAL_RESOLUTION = 0.7 # Vertical slice resolution
+    RADIUS = 2.5              # Search radius
+    VERTICAL_RESOLUTION = 1.5 # Vertical slice resolution
     MIN_PTS_PER_CLUSTER = 3   # Minimum points to form a tree seed
     
     # =========================================================

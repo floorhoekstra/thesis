@@ -42,7 +42,7 @@ class FoxTree:
             # Assign municipal trees to the nearest points
             self.seed_municipal_trees(municipal_trees)
 
-    def seed_municipal_trees(self, municipal_trees, search_radius=4.0):
+    def seed_municipal_trees(self, municipal_trees, search_radius=2.5):
         """
         Koppelt punten dichtbij bekende gemeentebomen vooraf aan een uniek tree_id.
         search_radius: straal (in meters, XY-vlak) om punten rond de gemeenteboom te zoeken.
