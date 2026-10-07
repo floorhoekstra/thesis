@@ -138,39 +138,53 @@ class CrownGrowthModel:
     def measure_crown_volume(self, points):
         """
         Meet het kroonvolume op basis van een 3D Alpha Shape.
+        Centreert de punten eerst om precisiefouten bij grote RD-coördinaten te voorkomen.
         """
         import alphashape
         import numpy as np
 
-        # Unieke punten filteren
+        # 1. Unieke punten filteren
         unique_points = np.unique(points, axis=0)
 
         if len(unique_points) < 4:
             return 0.0
 
-        # Vaste alpha (bijv. 0.5 tot 1.5 afhankelijk van je puntendichtheid)
-        # Je kunt alphashape ook zelf de optimale alpha laten zoeken via: alphashape.alphashape(unique_points)
-        alpha = 0.8  
+        # 2. CENTREER DE PUNTEN ROND HET MIDDELPUNT (0,0,0)
+        # Dit voorkomt floating-point afrondfouten bij grote RD New coördinaten
+        centroid = np.mean(unique_points, axis=0)
+        centered_points = unique_points - centroid
+
+        alpha = 0.8  # Vaste alpha
 
         try:
-            alpha_shape = alphashape.alphashape(unique_points, alpha)
+            # Genereer Alpha Shape op de gecentreerde punten
+            alpha_shape = alphashape.alphashape(centered_points, alpha)
 
             # Controleer of het resultaat een echt 3D volume (Mesh) is
             if hasattr(alpha_shape, 'volume'):
-                return abs(round(alpha_shape.volume, 2))
-            else:
-                # Fallback: als alpha te hoog was, is de vorm opgesplitst in platte vlakken
-                # We proberen het met een lossere alpha (convex hull equivalent = 0.0)
-                fallback_shape = alphashape.alphashape(unique_points, 0.0)
-                return abs(round(fallback_shape.volume, 2))
+                vol = float(alpha_shape.volume)
+                # Als het volume door een instabiele mesh bizar groot is (> 5000 m³ is vrijwel onmogelijk voor 1 boom)
+                if abs(vol) < 5000.0:
+                    return abs(round(vol, 2))
+
+            # Fallback 1: Als alpha te hoog/instabiel was, probeer een lagere, veiligere alpha (bijv. 0.2)
+            fallback_alpha = alphashape.alphashape(centered_points, 0.2)
+            if hasattr(fallback_alpha, 'volume'):
+                vol = float(fallback_alpha.volume)
+                if abs(vol) < 5000.0:
+                    return abs(round(vol, 2))
+
+            # Fallback 2: Convex hull (alpha = 0.0) als absolute ondergrens voor stabiliteit
+            convex_shape = alphashape.alphashape(centered_points, 0.0)
+            return abs(round(float(convex_shape.volume), 2))
 
         except Exception:
             return 0.0
 
-    def calculate_agb(self, ca, height):
+    def calculate_agb_bermudez(self, ca, height):
         """
         Berekent AGB (Above Ground Biomass) op basis van de formule:
-        AGB = e^{3.0863} * (CA * H)^{0.8127}
+        AGB = e^{alpha} * (CA * H)^{beta} like Bermudez et al., 2026
         waarbij CA = kroonoppervlakte en H = hoogte van de boom.
         """
         import numpy as np
@@ -178,9 +192,90 @@ class CrownGrowthModel:
         if ca is None or height is None or pd.isna(ca) or pd.isna(height):
             return None
         
+        alpha = 3.0863
+
+        beta = 0.8127
+
         try:
-            agb = np.exp(3.0863) * (ca * height) ** 0.8127
+            agb = np.exp(alpha) * (ca * height) ** beta
             return max(0.0, round(agb, 2))  # AGB mag niet negatief zijn
+        except Exception:
+            return None
+
+    def calculate_agb_bai(self, dbh, height):
+        """
+        Berekent AGB (Above Ground Biomass) (kroonbiomassa! niet de stam) op basis van AGB voor branches, fruits en leaves (Bai et al., 2020):
+        AGB_branch = 0.0061 * (DBH^2 *H)^0.8905
+        AGB_leaf = 0.2650*(DBH^2 *H)^0.4701
+        AGB_fruit = 0.0342 * (DBH^2 *H)^0.5779
+        AGB = AGB_branch + AGB_leaf + AGB_fruit
+        waarbij DBH = diameter at breast height en H = hoogte van de boom.
+        """
+        import numpy as np
+
+        if dbh is None or height is None or pd.isna(dbh) or pd.isna(height):
+            return None
+        try:
+            dbh = float(dbh)
+            height = float(height)
+
+            if dbh < 2.0:
+                dbh = dbh * 100
+
+            AGB_branch = 0.0061 * (dbh ** 2 * height) ** 0.8905
+            AGB_leaf = 0.2650 * (dbh ** 2 * height) ** 0.4701
+            AGB_fruit = 0.0342 * (dbh ** 2 * height) ** 0.5779
+            AGB = AGB_branch + AGB_leaf + AGB_fruit
+            return max(0.0, round(AGB, 2))  # AGB mag niet negatief zijn
+        except Exception:
+            return None
+
+    def parse_dbh_range_to_mean(self, dbh_value):
+        """
+        Zet een DBH attribuut om naar het gemiddelde als zwevendekommagetal (in meters).
+        Ondersteunt:
+        - Ranges: "20-30", "20 - 30 cm", "0.2-0.3 m", "20 tot 30"
+        - Enkele waarden: "25", "25 cm", "0.25 m"
+        """
+        if dbh_value is None or dbh_value != dbh_value:  # Controleert ook op NaN (pd.isna)
+            return None
+
+        # Omzetten naar string en opschonen
+        val_str = str(dbh_value).lower().replace(',', '.').strip()
+
+        # Controleer of de waarde expliciet in meters is aangegeven (bijv. "0.25 m")
+        is_meters = 'm' in val_str and 'cm' not in val_str
+
+        # Zoek alle getallen (inclusief decimalen) in de tekst
+        numbers = [float(n) for n in re.findall(r"\d+\.?\d*", val_str)]
+
+        if not numbers:
+            return None
+
+        # Als er een range van 2 getallen is gevonden (bijv. 20 en 30)
+        if len(numbers) >= 2:
+            mean_val = sum(numbers[:2]) / 2.0
+        else:
+            mean_val = numbers[0]
+
+        return mean_val
+
+    def calculate_stem_volume(self, dbh, height):
+        """
+        Berekent het stamvolume (Stem Volume) op basis van de formule:
+        ln(stem volume) = ln(a) + b * ln(DBH)
+        """
+        import numpy as np
+        
+        if dbh is None or height is None or pd.isna(dbh) or pd.isna(height):
+            return None
+        
+        a = 0.0002143  # Voorbeeldwaarde, vervang door de juiste parameter
+        b = 2.099     # Voorbeeldwaarde, vervang door de juiste parameter
+
+        try:
+            stem_volume = np.exp(np.log(a) + b * np.log(dbh))
+            return max(0.0, round(stem_volume, 2))  # Stamvolume mag niet negatief zijn
         except Exception:
             return None
         

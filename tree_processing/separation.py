@@ -1,8 +1,92 @@
 import time
+from unittest import case
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 from scipy.spatial import cKDTree
+from concurrent.futures import ProcessPoolExecutor
+
+def _process_single_tree(args):
+    """
+    Hulpfunctie voor multiprocessing: berekent de 2D polygoon en attributen voor 1 boom.
+    Draait op een eigen CPU-core.
+    """
+    t_id, indices, points_data, tree_attributes, growth_model_ref, alpha_2d = args
+    
+    if len(indices) < 3:
+        return None
+
+    from shapely.geometry import MultiPoint, Polygon, MultiPolygon
+    import alphashape
+
+    tree_points_xy = points_data[indices][:, :2]
+
+    try:
+        hull = alphashape.alphashape(tree_points_xy, alpha_2d)
+        if isinstance(hull, MultiPolygon):
+            hull = max(hull.geoms, key=lambda p: p.area)
+        elif not isinstance(hull, Polygon):
+            hull = MultiPoint(tree_points_xy).convex_hull
+    except Exception:
+        hull = MultiPoint(tree_points_xy).convex_hull
+
+    if not (isinstance(hull, Polygon) and hull.area > 0):
+        return None
+
+    z_values = points_data[indices][:, 2]
+    max_z = float(np.max(z_values))
+    min_z = float(np.min(z_values))
+    tree_height = max_z - min_z
+    
+    attr = tree_attributes.get(t_id, {})
+    muni_attrs = attr.get("muni_attributes", {})
+    scientific_name = attr.get("species_scientific", None)
+    age = attr.get("age_years", None)
+    is_municipal = attr.get("is_municipal", False)
+    
+    if age and float(age) > 1800:
+        age = time.localtime().tm_year - float(age)
+
+    measured_cd = round(2 * np.sqrt(hull.area / np.pi), 2)
+
+    # Fysische & Biomassa metingen via het groeimodel
+    calc_cv = growth_model_ref.calculate_crown_volume(measured_cd, tree_height) if growth_model_ref else None
+    measured_cv = growth_model_ref.measure_crown_volume(points_data[indices]) if growth_model_ref else None
+    
+    raw_dbh = muni_attrs.get("Stamdiameterklasse", None)
+    dbh = growth_model_ref.parse_dbh_range_to_mean(raw_dbh) if growth_model_ref else None
+
+    calc_sv = growth_model_ref.calculate_stem_volume(dbh, tree_height) if growth_model_ref else None
+    calc_agb_bermudez = growth_model_ref.calculate_agb_bermudez(round(hull.area, 2), tree_height) if growth_model_ref else None
+    calc_agb_bai = growth_model_ref.calculate_agb_bai(dbh, tree_height)
+
+    base_info = {
+        "tree_id": int(t_id),
+        "num_points": int(len(indices)),
+        "height_m": round(tree_height, 2),
+        "max_z": round(max_z, 2),
+        "species_sci": scientific_name,
+        "age_years": age,
+        "measured_cd_m": measured_cd,
+        "measured_cv_m3": measured_cv,
+        "model_agb_kg_bermudez": calc_agb_bermudez,
+        "model_agb_kg_bai": calc_agb_bai,
+        "model_sv_m3": calc_sv,
+        "is_municipal": is_municipal
+    }
+
+    if is_municipal:
+        record = dict(muni_attrs)
+        record.update(base_info)
+        record["poly_type"] = "measured_municipal"
+        record["geometry"] = hull
+        return record
+    else:
+        record = dict(base_info)
+        record["poly_type"] = "measured_ahn_tree"
+        record["geometry"] = hull
+        return record
+    print(f"DEBUG: Finished processing tree {t_id} with {len(indices)} points.")
 
 class FoxTree:
     def __init__(self, points_array, radius, vertical_resolution, min_pts_per_cluster, municipal_trees=None, growth_model=None):
@@ -409,91 +493,26 @@ class FoxTree:
 
     def output_tree_polygons(self, filename, crs="EPSG:28992", alpha_2d=0.3):
         """
-        Exporteert alle polygonen (gemeten, gemodelleerd en niet-gekoppeld) naar 1 GeoPackage.
+        Exporteert alle polygonen naar GeoPackage met behulp van parallelle verwerking.
         """
-        from shapely.geometry import MultiPoint, Polygon, MultiPolygon
-        import alphashape
+        print(f"Polygonen genereren voor {len(self.trees)} bomen en opslaan naar: {filename}...")
+        t_start = time.time()
 
-        print(f"Polygonen genereren en opslaan naar: {filename}...")
+        # 1. Bereid alle taken voor de CPU-cores voor
+        tasks = [
+            (t_id, indices, self.points_data, self.tree_attributes, self.growth_model, alpha_2d)
+            for t_id, indices in self.trees.items()
+        ]
+
+        # 2. Verdeel het werk over alle beschikbare CPU-cores
         all_records = []
+        with ProcessPoolExecutor() as executor:
+            results = list(executor.map(_process_single_tree, tasks))
 
-        # 1. Verwerk alle gedetecteerde AHN-bomenwolk clusters
-        for t_id, indices in self.trees.items():
-            if len(indices) < 3:
-                continue
+        # Filter eventuele lege (None) resultaten eruit
+        all_records = [r for r in results if r is not None]
 
-            tree_points_xy = self.points_data[indices][:, :2]
-
-
-            try:
-                hull = alphashape.alphashape(tree_points_xy, alpha_2d)
-                
-                # Als alpha te hoog was, valt de vorm soms uit elkaar in een MultiPolygon of GeometryCollection.
-                # Pak in dat geval de convex_hull of de grootste polygoon als fallback.
-                if isinstance(hull, MultiPolygon):
-                    hull = max(hull.geoms, key=lambda p: p.area)
-                elif not isinstance(hull, Polygon):
-                    # Fallback naar convex hull (alpha = 0)
-                    hull = MultiPoint(tree_points_xy).convex_hull
-            except Exception:
-                # Fallback bij eventuele rekenfouten
-                hull = MultiPoint(tree_points_xy).convex_hull
-
-            if isinstance(hull, Polygon) and hull.area > 0:
-                z_values = self.points_data[indices][:, 2]
-                max_z = float(np.max(z_values))
-                min_z = float(np.min(z_values))
-                tree_height = max_z - min_z
-                
-                attr = self.tree_attributes.get(t_id, {})
-                muni_attrs = attr.get("muni_attributes", {})
-                scientific_name = attr.get("species_scientific", None)
-                age = attr.get("age_years", None)
-                is_municipal = attr.get("is_municipal", False)
-                
-                if age and float(age) > 1800:
-                    current_year = time.localtime().tm_year
-                    age = current_year - float(age)
-
-                calc_cd = None
-                if self.growth_model and scientific_name:
-                    calc_cd = self.growth_model.calculate_crown_diameter(scientific_name, age)
-
-                # Kroondiameter en oppervlakte op basis van de 2D Alpha Shape polygoon
-                measured_cd = round(2 * np.sqrt(hull.area / np.pi), 2)
-
-                calc_cv = self.growth_model.calculate_crown_volume(measured_cd, tree_height) if self.growth_model else None
-                calc_agb = self.growth_model.calculate_agb(round(hull.area, 2), tree_height) if self.growth_model else None
-                measured_cv = self.growth_model.measure_crown_volume(self.points_data[indices]) if self.growth_model else None
-
-                base_info = {
-                    "tree_id": int(t_id),
-                    "num_points": int(len(indices)),
-                    "height_m": round(tree_height, 2),
-                    "max_z": round(max_z, 2),
-                    "species_sci": scientific_name,
-                    "age_years": age,
-                    "measured_cd_m": measured_cd,
-                    "model_cd_m": calc_cd,
-                    "measured_cv_m3": measured_cv,
-                    "model_cv_m3": calc_cv,
-                    "model_agb_t": calc_agb,
-                    "is_municipal": is_municipal
-                }
-
-                if is_municipal:
-                    record = dict(muni_attrs)
-                    record.update(base_info)
-                    record["poly_type"] = "measured_municipal"
-                    record["geometry"] = hull
-                    all_records.append(record)
-                else:
-                    record = dict(base_info)
-                    record["poly_type"] = "measured_ahn_tree"
-                    record["geometry"] = hull
-                    all_records.append(record)
-
-        # 2. Voeg niet-gekoppelde gemeentebomen toe als ronde modelcirkels
+        # 3. Voeg niet-gekoppelde gemeentebomen toe als ronde modelcirkels
         unlinked_records = self.get_unlinked_municipal_polygons(default_radius=2.0)
         all_records.extend(unlinked_records)
 
@@ -501,14 +520,17 @@ class FoxTree:
             print("Geen geldige boompolygonen gegenereerd.")
             return
 
-        # Sla op naar GeoPackage
+        # 4. Sla op naar GeoPackage
         gdf = gpd.GeoDataFrame(all_records, crs=crs)
         gdf.to_file(filename, driver="GPKG")
-        print(f"Succesvol {len(gdf)} polygonen opgeslagen in {filename}!")
+        
+        t_end = time.time()
+        print(f"Succesvol {len(gdf)} polygonen opgeslagen in {filename}! (Verwerkingstijd: {t_end - t_start:.2f} sec)")
 
     def visualize_tree(self, tree_id, alpha=0.8):
         """
         Visualiseert de 3D Alpha Shape en puntenwolk van één specifieke boom.
+        Roept measure_crown_volume uit self.growth_model direct aan als output_tree_polygons nog niet is gedraaid.
         """
         import alphashape
         import numpy as np
@@ -518,7 +540,6 @@ class FoxTree:
             print(f"Boom ID {tree_id} niet gevonden!")
             return
 
-        # Haal de punten van de specifieke boom op
         indices = self.trees[tree_id]
         tree_points = self.points_data[indices]
         unique_points = np.unique(tree_points, axis=0)
@@ -527,27 +548,48 @@ class FoxTree:
             print(f"Boom {tree_id} heeft te weinig unieke punten ({len(unique_points)}) voor een 3D mesh.")
             return
 
-        # Bereken de Alpha Shape
-        alpha_shape = alphashape.alphashape(unique_points, alpha)
-        if not hasattr(alpha_shape, 'volume'):
-            print(f"Alpha {alpha} was te hoog, fallback naar Convex Hull (alpha=0.0)...")
-            alpha_shape = alphashape.alphashape(unique_points, 0.0)
+        # 1. Haal op of bereken direct het volume via growth_model
+        attr = self.tree_attributes.get(tree_id, {})
+        volume = attr.get("measured_cv_m3")
 
-        volume = round(alpha_shape.volume, 2)
-        print(f"Visualiseren van Boom {tree_id} - Berekend Volume: {volume} m³")
+        # Als het volume nog niet in tree_attributes staat (omdat export nog niet is gedraaid):
+        if volume is None and self.growth_model:
+            # Roept measure_crown_volume direct aan uit models.py
+            volume = self.growth_model.measure_crown_volume(unique_points)
+            
+            # Optioneel direct opslaan voor herbruikbaarheid
+            if tree_id not in self.tree_attributes:
+                self.tree_attributes[tree_id] = {}
+            self.tree_attributes[tree_id]["measured_cv_m3"] = volume
 
-        # PyVista Plotter
+        # 2. Centreer punten voor PyVista mesh-generatie (voorkomt negatieve/reusachtige volumes in RD)
+        centroid = np.mean(unique_points, axis=0)
+        centered_points = unique_points - centroid
+
+        try:
+            alpha_shape = alphashape.alphashape(centered_points, alpha)
+            if not hasattr(alpha_shape, 'faces') or len(alpha_shape.faces) == 0:
+                alpha_shape = alphashape.alphashape(centered_points, 0.0)
+        except Exception:
+            alpha_shape = alphashape.alphashape(centered_points, 0.0)
+
+        vol_display = volume if volume is not None else "Onbekend"
+        print(f"Visualiseren van Boom {tree_id} | Volume: {vol_display} m³")
+
+        # 3. PyVista Plotter
         plotter = pv.Plotter(window_size=[1024, 768])
-        plotter.add_title(f"Tree ID: {tree_id} | Volume: {volume} m³ (Alpha = {alpha})")
+        plotter.add_title(f"Tree ID: {tree_id} | Volume: {vol_display} m³ (Alpha = {alpha})")
 
-        # Puntenwolk (Groen)
+        # Puntenwolk weergeven op originele coördinaten
         point_cloud = pv.PolyData(unique_points)
         plotter.add_mesh(point_cloud, color="#2ecc71", point_size=5, render_points_as_spheres=True, label="Puntenwolk")
 
-        # Mesh van de Alpha Shape (Blauw, transparant)
+        # Mesh herstellen naar originele coördinaten voor de visualisatie
         faces = alpha_shape.faces
         pv_faces = np.c_[np.full(len(faces), 3), faces].ravel()
-        mesh = pv.PolyData(alpha_shape.vertices, pv_faces)
+        uncentered_vertices = alpha_shape.vertices + centroid
+        mesh = pv.PolyData(uncentered_vertices, pv_faces)
+        
         plotter.add_mesh(mesh, color="#3498db", opacity=0.45, show_edges=True, edge_color="#1b4f72", label="3D Volume Mesh")
 
         plotter.add_legend()

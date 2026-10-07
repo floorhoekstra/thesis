@@ -53,7 +53,7 @@ def process_file(input_path, output_path, radius, v_res, min_pts, municipal_tree
     t_process_end = time.time()
 
     # 3. Visualize a few sample trees
-    sample_tree_ids = list(fox_tree.trees.keys())[:3]
+    sample_tree_ids = list(fox_tree.trees.keys())[119:120]
     for t_id in sample_tree_ids:
         fox_tree.visualize_tree(tree_id=t_id, alpha=0.8)
         
