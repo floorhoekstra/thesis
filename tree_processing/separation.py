@@ -60,6 +60,9 @@ def _process_single_tree(args):
     calc_agb_bermudez = growth_model_ref.calculate_agb_bermudez(round(hull.area, 2), tree_height) if growth_model_ref else None
     calc_agb_bai = growth_model_ref.calculate_agb_bai(dbh, tree_height)
 
+    # C-TAT lookup
+    ctat_type = growth_model_ref.get_ctat_type(scientific_name) if growth_model_ref else None
+
     base_info = {
         "tree_id": int(t_id),
         "num_points": int(len(indices)),
@@ -72,7 +75,8 @@ def _process_single_tree(args):
         "model_agb_kg_bermudez": calc_agb_bermudez,
         "model_agb_kg_bai": calc_agb_bai,
         "model_sv_m3": calc_sv,
-        "is_municipal": is_municipal
+        "is_municipal": is_municipal,
+        "ctat_type": ctat_type
     }
 
     if is_municipal:

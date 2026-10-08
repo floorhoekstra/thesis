@@ -12,6 +12,7 @@ class CrownGrowthModel:
     def __init__(self, ref_excel_path=None):
         self.ref_data = {}
         self.genus_data = {}
+        self.ctat_lookup = {}  # <-- Nieuwe dictionary voor C-TAT typen
         
         if ref_excel_path and os.path.exists(ref_excel_path):
             self.load_reference_table(ref_excel_path)
@@ -22,10 +23,10 @@ class CrownGrowthModel:
         Vangt lege Species/Cultivar op en koppelt de Genus (geslacht).
         """
         try:
-            df = pd.read_excel(path)
-            df.columns = [str(c).strip() for c in df.columns]
+            df_growth = pd.read_excel(path, sheet_name=0)
+            df_growth.columns = [str(c).strip() for c in df_growth.columns]
 
-            for _, row in df.iterrows():
+            for _, row in df_growth.iterrows():
                 # Genus, Species en Cultivar veilig inlezen
                 genus = str(row['Genus']).strip().lower() if pd.notna(row.get('Genus')) else ""
                 species = str(row['Species']).strip().lower() if pd.notna(row.get('Species')) else ""
@@ -63,6 +64,51 @@ class CrownGrowthModel:
 
         except Exception as e:
             print(f"FOUT bij inladen referentietabel {path}: {e}")
+
+        # C-TAT lookup tabel inladen
+        try:
+            df_ctat = pd.read_excel(path, sheet_name=1)
+            df_ctat.columns = [str(c).strip() for c in df_ctat.columns]
+
+            for _, row in df_ctat.iterrows():
+                species = str(row['Species']).strip() if pd.notna(row.get('Species')) else None
+                # Zoekt kolom 'C-TAT Type' of 'C-TAT\nType' als er een enter in de kolomkop staat
+                ctat_val = row.get('C-TAT Type', row.get('C-TAT\nType', None))
+
+                if species and pd.notna(ctat_val):
+                    # Sla op onder de kleine letters van de soortnaam voor een snelle lookup
+                    self.ctat_lookup[species.lower()] = ctat_val
+
+            print(f"C-TAT lookup geladen: {len(self.ctat_lookup)} typen.")
+
+        except Exception as e:
+            print(f"FOUT bij inladen C-TAT lookup tabel {path}: {e}")
+
+    def get_ctat_type(self, scientific_name):
+        """
+        Zoekt het C-TAT Type op voor een wetenschappelijke naam met een fallback naar Genus.
+        """
+        if not scientific_name or pd.isna(scientific_name):
+            return None
+
+        sci_clean = str(scientific_name).strip().lower()
+
+        # 1. Directe exacte match
+        if sci_clean in self.ctat_lookup:
+            return self.ctat_lookup[sci_clean]
+
+        # 2. Match zonder cultivar (bijv. "Acer cappadocicum 'Rubrum'" -> "Acer cappadocicum")
+        base_species = sci_clean.split("'")[0].replace('"', '').strip()
+        if base_species in self.ctat_lookup:
+            return self.ctat_lookup[base_species]
+
+        # 3. Fallback op Geslacht (bijv. "Acer pseudoplatanus" -> zoekt eerste "Acer")
+        genus = sci_clean.split()[0]
+        for species_key, ctat_val in self.ctat_lookup.items():
+            if species_key.startswith(genus):
+                return ctat_val
+
+        return None
 
     def get_parameters(self, scientific_name):
         """
@@ -270,8 +316,8 @@ class CrownGrowthModel:
         if dbh is None or height is None or pd.isna(dbh) or pd.isna(height):
             return None
         
-        a = 0.0002143  # Voorbeeldwaarde, vervang door de juiste parameter
-        b = 2.099     # Voorbeeldwaarde, vervang door de juiste parameter
+        a = 0.0002143  
+        b = 2.099     
 
         try:
             stem_volume = np.exp(np.log(a) + b * np.log(dbh))

@@ -82,7 +82,7 @@ if __name__ == "__main__":
     INPUT_DIR_NAME = "Input"
     OUTPUT_DIR_NAME = "Output"
     MUNICIPAL_TREES_FILE = "bomen_denhaag_clipped.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
-    REF_EXCEL_PATH = "growth_parameters_iTree.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
+    REF_EXCEL_PATH = "additional_parameters.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
     
     # Algorithm parameters
     RADIUS = 2.5              # Search radius
