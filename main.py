@@ -4,70 +4,91 @@ import sys
 import time
 import numpy as np
 import geopandas as gpd
+import pickle
 
 from tree_processing.models import CrownGrowthModel
 from tree_processing.separation import FoxTree
 
 def process_file(input_path, output_path, radius, v_res, min_pts, municipal_trees_path=None, ref_excel_path=None, growth_model=None):
     """
-    Handles loading, processing, and saving for a single file with timing.
+    Handles loading, processing, and saving for a single file with timing and Pickle caching.
     """
     file_start_time = time.time()
 
-    # 1. Load Data
-    try:
-        t_load_start = time.time()
-        # Load XYZ data
-        points = np.loadtxt(input_path, usecols=(0, 1, 2))
-        t_load_end = time.time()
-    except Exception as e:
-        print(f"Error loading data from {input_path}: {e}")
-        return
+    # 1. Definieer het cache pad
+    cache_path = output_path.replace('.xyz', '_fox_tree_cache.pkl')
+    fox_tree = None
 
-    if points.size == 0:
-        print(f"Point cloud in {input_path} is empty or invalid.")
-        return
-
-    muni_trees = None
-    if municipal_trees_path and os.path.exists(municipal_trees_path):
+    # 2. Check of er al een gecachte status bestaat
+    if os.path.exists(cache_path):
+        print(f"Gecachte boomclusters gevonden! Inladen vanaf: {os.path.basename(cache_path)}")
+        t_cache_start = time.time()
         try:
-            # Lees het GeoPackage bestand in met GeoPandas
-            muni_trees = gpd.read_file(municipal_trees_path)
-            
-            # Zet de X en Y coördinaten om naar een NumPy array
-            # muni_trees = np.column_stack((gdf.geometry.x, gdf.geometry.y))
-            print(f"Succesvol {len(muni_trees)} gemeentebomen ingeladen uit .gpkg!")
+            with open(cache_path, "rb") as f:
+                fox_tree = pickle.load(f)
+            t_cache_end = time.time()
+            print(f"  [Time] Cache Inladen: {t_cache_end - t_cache_start:.4f} sec (Data inlezen & scheiden overgeslagen!)")
         except Exception as e:
-            print(f"Fout bij het inladen van gemeentebomen .gpkg ({municipal_trees_path}): {e}")
+            print(f"Kon cache niet inladen ({e}). Er wordt opnieuw gerekend.")
+            fox_tree = None
 
-    growth_model = CrownGrowthModel(ref_excel_path) if ref_excel_path else None
+    # 3. Als er geen cache is, voer het volledige inlees- en scheidingsproces uit
+    if fox_tree is None:
+        try:
+            t_load_start = time.time()
+            points = np.loadtxt(input_path, usecols=(0, 1, 2))
+            t_load_end = time.time()
+        except Exception as e:
+            print(f"Error loading data from {input_path}: {e}")
+            return
 
-    print(f"\nProcessing: {os.path.basename(input_path)}")
-    print(f"Loaded {len(points)} points.")
-    print(f"  [Time] Data Loading: {t_load_end - t_load_start:.4f} sec")
+        if points.size == 0:
+            print(f"Point cloud in {input_path} is empty or invalid.")
+            return
 
-    # 2. Initialization & Separation
-    t_process_start = time.time()
-    fox_tree = FoxTree(points, radius, v_res, min_pts, municipal_trees=muni_trees, growth_model=growth_model)
-    fox_tree.separate_trees()
-    t_process_end = time.time()
+        muni_trees = None
+        if municipal_trees_path and os.path.exists(municipal_trees_path):
+            try:
+                muni_trees = gpd.read_file(municipal_trees_path)
+                print(f"Succesvol {len(muni_trees)} gemeentebomen ingeladen uit .gpkg!")
+            except Exception as e:
+                print(f"Fout bij het inladen van gemeentebomen .gpkg ({municipal_trees_path}): {e}")
 
-    # 3. Visualize a few sample trees
+        growth_model_inst = CrownGrowthModel(ref_excel_path) if ref_excel_path else None
+
+        print(f"\nProcessing: {os.path.basename(input_path)}")
+        print(f"Loaded {len(points)} points.")
+        print(f"  [Time] Data Loading: {t_load_end - t_load_start:.4f} sec")
+
+        # Tree Initialization & Separation
+        t_process_start = time.time()
+        fox_tree = FoxTree(points, radius, v_res, min_pts, municipal_trees=muni_trees, growth_model=growth_model_inst)
+        fox_tree.separate_trees()
+        t_process_end = time.time()
+        print(f"  [Time] Tree Separation: {t_process_end - t_process_start:.4f} sec")
+
+        # Opslaan in cache voor de volgende keer
+        try:
+            with open(cache_path, "wb") as f:
+                pickle.dump(fox_tree, f)
+            print(f"Resulaten opgeslagen in cache: {os.path.basename(cache_path)}")
+        except Exception as e:
+            print(f"Kon cache niet opslaan: {e}")
+
+    # 4. Visualize a few sample trees (Draait nu supersnel uit de cache!)
     sample_tree_ids = list(fox_tree.trees.keys())[119:120]
     for t_id in sample_tree_ids:
         fox_tree.visualize_tree(tree_id=t_id, alpha=0.8)
         
-    # 4. Output
+    # 5. Output
     t_write_start = time.time()
-    fox_tree.output_trees(output_path)
+    # fox_tree.output_trees(output_path)  # Optioneel uitgeschakeld als je alleen polygonen wilt
     fox_tree.output_tree_polygons(output_path.replace('.xyz', '_polygons.gpkg'))
     t_write_end = time.time()
     
     file_end_time = time.time()
 
     print(f"\n--- Timing Summary for {os.path.basename(input_path)} ---")
-    print(f"  Data Loading:      {t_load_end - t_load_start:.4f} sec")
-    print(f"  Tree Separation:   {t_process_end - t_process_start:.4f} sec")
     print(f"  Writing Output:    {t_write_end - t_write_start:.4f} sec")
     print(f"  Total File Time:   {file_end_time - file_start_time:.4f} sec")
     print("---------------------------------------------------------")

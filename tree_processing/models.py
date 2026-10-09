@@ -16,7 +16,9 @@ class CrownGrowthModel:
         
         if ref_excel_path and os.path.exists(ref_excel_path):
             self.load_reference_table(ref_excel_path)
-            
+
+
+    ## Referentietabel inladen
     def load_reference_table(self, path):
         """
         Laadt Appendix 4 in en leest op basis van kolomposities.
@@ -109,7 +111,8 @@ class CrownGrowthModel:
                 return ctat_val
 
         return None
-
+    
+    # Groeimodel en parameters
     def get_parameters(self, scientific_name):
         """
         Zoekt parameters op. Neemt het eerste woord (Genus) als terugvaloptie.
@@ -164,6 +167,43 @@ class CrownGrowthModel:
             return max(0.0, round(cd_bounded, 2))  # Kroondiameter mag niet negatief zijn
         except Exception:
             return None
+
+    # Bereken oppervlakte, volume en biomassa
+    def calculate_crown_area(self, points):
+        """
+        Berekent de kroonoppervlakte (Crown Area) op basis van een 2D Alpha Shape.
+        """
+        import alphashape
+        import numpy as np
+
+        # 1. Unieke punten filteren
+        unique_points = np.unique(points, axis=0)
+
+        if len(unique_points) < 3:
+            return 0.0
+
+        # 2. CENTREER DE PUNTEN ROND HET MIDDELPUNT (0,0)
+        centroid = np.mean(unique_points[:, :2], axis=0)
+        centered_points = unique_points[:, :2] - centroid
+
+        alpha = 0.8  # Vaste alpha
+
+        try:
+            # Genereer Alpha Shape op de gecentreerde punten
+            alpha_shape = alphashape.alphashape(centered_points, alpha)
+
+            # Controleer of het resultaat een echt 2D oppervlak is
+            if hasattr(alpha_shape, 'area'):
+                area = float(alpha_shape.area)
+                if abs(area) < 500.0:  # Als het oppervlak door een instabiele mesh bizar groot is (> 500 m² is vrijwel onmogelijk voor 1 boom)
+                    return abs(round(area, 2))
+
+            # Fallback: Convex hull (alpha = 0.0) als absolute ondergrens voor stabiliteit
+            convex_shape = alphashape.alphashape(centered_points, 0.0)
+            return abs(round(float(convex_shape.area), 2))
+
+        except Exception:
+            return 0.0
 
     def calculate_crown_volume(self, cd, height):
         """

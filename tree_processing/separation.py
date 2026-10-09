@@ -49,7 +49,10 @@ def _process_single_tree(args):
 
     measured_cd = round(2 * np.sqrt(hull.area / np.pi), 2)
 
+    measured_ca = growth_model_ref.calculate_crown_area(points_data[indices]) if growth_model_ref else None
+
     # Fysische & Biomassa metingen via het groeimodel
+    
     calc_cv = growth_model_ref.calculate_crown_volume(measured_cd, tree_height) if growth_model_ref else None
     measured_cv = growth_model_ref.measure_crown_volume(points_data[indices]) if growth_model_ref else None
     
@@ -71,6 +74,7 @@ def _process_single_tree(args):
         "species_sci": scientific_name,
         "age_years": age,
         "measured_cd_m": measured_cd,
+        "measured_ca_m2": measured_ca,
         "measured_cv_m3": measured_cv,
         "model_agb_kg_bermudez": calc_agb_bermudez,
         "model_agb_kg_bai": calc_agb_bai,
@@ -90,7 +94,6 @@ def _process_single_tree(args):
         record["poly_type"] = "measured_ahn_tree"
         record["geometry"] = hull
         return record
-    print(f"DEBUG: Finished processing tree {t_id} with {len(indices)} points.")
 
 class FoxTree:
     def __init__(self, points_array, radius, vertical_resolution, min_pts_per_cluster, municipal_trees=None, growth_model=None):
