@@ -76,9 +76,9 @@ def process_file(input_path, output_path, radius, v_res, min_pts, municipal_tree
             print(f"Kon cache niet opslaan: {e}")
 
     # 4. Visualize a few sample trees (Draait nu supersnel uit de cache!)
-    sample_tree_ids = list(fox_tree.trees.keys())[119:120]
-    for t_id in sample_tree_ids:
-        fox_tree.visualize_tree(tree_id=t_id, alpha=0.8)
+    # sample_tree_ids = list(fox_tree.trees.keys())[119:120]
+    # for t_id in sample_tree_ids:
+    #     fox_tree.visualize_tree(tree_id=t_id, alpha=0.8)
         
     # 5. Output
     t_write_start = time.time()
@@ -103,12 +103,14 @@ if __name__ == "__main__":
     INPUT_DIR_NAME = "Input"
     OUTPUT_DIR_NAME = "Output"
     MUNICIPAL_TREES_FILE = "bomen_denhaag_clipped.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
-    REF_EXCEL_PATH = "additional_parameters.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
+    REF_EXCEL_PATH = None  # Optional: Path to Appendix 4 reference table for crown growth model
     
     # Algorithm parameters
     RADIUS = 2.5              # Search radius
     VERTICAL_RESOLUTION = 1.5 # Vertical slice resolution
     MIN_PTS_PER_CLUSTER = 3   # Minimum points to form a tree seed
+
+    MERGED_OUTPUT_NAME = f"wijk_alle_bomen_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}.gpkg"
     
     # =========================================================
     #                   MAIN EXECUTION
@@ -153,8 +155,43 @@ if __name__ == "__main__":
         out_filename = f"{name_root}_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}{ext}"
         out_full_path = os.path.join(output_dir, out_filename)
         
-        process_file(file_path, out_full_path, RADIUS, VERTICAL_RESOLUTION, MIN_PTS_PER_CLUSTER, municipal_trees_path=os.path.join(input_dir, MUNICIPAL_TREES_FILE), ref_excel_path=os.path.join(input_dir, REF_EXCEL_PATH), growth_model=None)
+        process_file(file_path, out_full_path, RADIUS, VERTICAL_RESOLUTION, MIN_PTS_PER_CLUSTER, municipal_trees_path=os.path.join(input_dir, MUNICIPAL_TREES_FILE), ref_excel_path=os.path.join(input_dir, REF_EXCEL_PATH) if REF_EXCEL_PATH else None, growth_model=None)
         
+    print("\n" + "="*50)
+    print("Alle losse bestanden verwerkt. Bezig met samenvoegen tot één wijk-bestand...")
+    print("="*50)
+
+    # Zoek alle gegenereerde polygonen GeoPackages in de output map
+    polygon_files = glob.glob(os.path.join(output_dir, "*_polygons.gpkg"))
+
+    if polygon_files:
+        gdf_list = []
+        for p_file in polygon_files:
+            # Sla het uiteindelijke wijkbestand zelf over als dat er al stond van een vorige run
+            if os.path.basename(p_file) == MERGED_OUTPUT_NAME:
+                continue
+            try:
+                gdf = gpd.read_file(p_file)
+                gdf_list.append(gdf)
+            except Exception as e:
+                print(f"Kon {os.path.basename(p_file)} niet inlezen voor samenvoeging: {e}")
+
+        if gdf_list:
+            # Combineer alle GeoDataFrames in één grote GeoDataFrame
+            merged_gdf = gpd.concat(gdf_list, ignore_index=True)
+            
+            # Sla op in de output map
+            merged_output_path = os.path.join(output_dir, MERGED_OUTPUT_NAME)
+            merged_gdf.to_file(merged_output_path, driver="GPKG")
+            
+            print(f" Succesvol! Alle bomen samengevoegd.")
+            print(f" Totaal aantal bomen in wijkbestand: {len(merged_gdf)}")
+            print(f" Opgeslagen als: {merged_output_path}")
+        else:
+            print("Geen geldige polygonen gevonden om samen te voegen.")
+    else:
+        print("Geen polygonen bestanden gevonden in de output directory.")
+
     batch_end_time = time.time()
     print(f"\nAll tasks completed in {batch_end_time - batch_start_time:.4f} seconds.")
 
