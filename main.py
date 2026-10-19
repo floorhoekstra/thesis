@@ -5,6 +5,7 @@ import time
 import numpy as np
 import geopandas as gpd
 import pickle
+import pandas as pd
 
 from tree_processing.models import CrownGrowthModel
 from tree_processing.separation import FoxTree
@@ -103,14 +104,15 @@ if __name__ == "__main__":
     INPUT_DIR_NAME = "Input"
     OUTPUT_DIR_NAME = "Output"
     MUNICIPAL_TREES_FILE = "bomen_denhaag_clipped.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
-    REF_EXCEL_PATH = None  # Optional: Path to Appendix 4 reference table for crown growth model
+    REF_EXCEL_PATH = "additional_parameters.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
+    WIJK = "Duindorp"
     
     # Algorithm parameters
     RADIUS = 2.5              # Search radius
     VERTICAL_RESOLUTION = 1.5 # Vertical slice resolution
     MIN_PTS_PER_CLUSTER = 3   # Minimum points to form a tree seed
 
-    MERGED_OUTPUT_NAME = f"wijk_alle_bomen_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}.gpkg"
+    MERGED_OUTPUT_NAME = f"{WIJK}_alle_bomen_{RADIUS}_{VERTICAL_RESOLUTION}_{MIN_PTS_PER_CLUSTER}.gpkg"
     
     # =========================================================
     #                   MAIN EXECUTION
@@ -178,8 +180,24 @@ if __name__ == "__main__":
 
         if gdf_list:
             # Combineer alle GeoDataFrames in één grote GeoDataFrame
-            merged_gdf = gpd.concat(gdf_list, ignore_index=True)
+            merged_gdf = pd.concat(gdf_list, ignore_index=True)
+
+            # Remove duplicates based on geometry and attributes if necessary
+            initial_count = len(merged_gdf)
+            if "measured_cv_m3" in merged_gdf.columns:
+                # Verwijder rijen waar geen gemeten kroonvolume uit de puntwolk is berekend
+                merged_gdf = merged_gdf[merged_gdf["measured_cv_m3"].notna() & (merged_gdf["measured_cv_m3"] > 0)]
+                print(f"Gemeentebomen zonder puntwolk-meting gefilterd: {initial_count - len(merged_gdf)} rijen verwijderd.")
+
+            # Ontdubbelen op basis van geometry / centroid zoals je al deed
+            initial_count_dedup = len(merged_gdf)
+            merged_gdf = merged_gdf.drop_duplicates(subset=['geometry'])
             
+            merged_gdf['centroid'] = merged_gdf.geometry.centroid
+            merged_gdf = merged_gdf.drop_duplicates(subset=['centroid'])
+            merged_gdf = merged_gdf.drop(columns=['centroid'])
+            
+            print(f"Dubbele bomen verwijderd door overlap: {initial_count_dedup - len(merged_gdf)} bomen gewist.")
             # Sla op in de output map
             merged_output_path = os.path.join(output_dir, MERGED_OUTPUT_NAME)
             merged_gdf.to_file(merged_output_path, driver="GPKG")

@@ -53,15 +53,15 @@ def _process_single_tree(args):
 
     # Fysische & Biomassa metingen via het groeimodel
     
-    calc_cv = growth_model_ref.calculate_crown_volume(measured_cd, tree_height) if growth_model_ref else None
+    # calc_cv = growth_model_ref.calculate_crown_volume(measured_cd, tree_height) if growth_model_ref else None
     measured_cv = growth_model_ref.measure_crown_volume(points_data[indices]) if growth_model_ref else None
     
-    raw_dbh = muni_attrs.get("Stamdiameterklasse", None)
-    dbh = growth_model_ref.parse_dbh_range_to_mean(raw_dbh) if growth_model_ref else None
+    # raw_dbh = muni_attrs.get("Stamdiameterklasse", None)
+    # dbh = growth_model_ref.parse_dbh_range_to_mean(raw_dbh) if growth_model_ref else None
 
-    calc_sv = growth_model_ref.calculate_stem_volume(dbh, tree_height) if growth_model_ref else None
+    # calc_sv = growth_model_ref.calculate_stem_volume(dbh, tree_height) if growth_model_ref else None
     calc_agb_bermudez = growth_model_ref.calculate_agb_bermudez(round(hull.area, 2), tree_height) if growth_model_ref else None
-    calc_agb_bai = growth_model_ref.calculate_agb_bai(dbh, tree_height)
+    # calc_agb_bai = growth_model_ref.calculate_agb_bai(dbh, tree_height)
 
     # C-TAT lookup
     ctat_type = growth_model_ref.get_ctat_type(scientific_name) if growth_model_ref else None
@@ -77,8 +77,8 @@ def _process_single_tree(args):
         "measured_ca_m2": measured_ca,
         "measured_cv_m3": measured_cv,
         "model_agb_kg_bermudez": calc_agb_bermudez,
-        "model_agb_kg_bai": calc_agb_bai,
-        "model_sv_m3": calc_sv,
+        # "model_agb_kg_bai": calc_agb_bai,
+        # "model_sv_m3": calc_sv,
         "is_municipal": is_municipal,
         "ctat_type": ctat_type
     }
@@ -520,8 +520,8 @@ class FoxTree:
         all_records = [r for r in results if r is not None]
 
         # 3. Voeg niet-gekoppelde gemeentebomen toe als ronde modelcirkels
-        unlinked_records = self.get_unlinked_municipal_polygons(default_radius=2.0)
-        all_records.extend(unlinked_records)
+        # unlinked_records = self.get_unlinked_municipal_polygons(default_radius=2.0)
+        # all_records.extend(unlinked_records)
 
         if not all_records:
             print("Geen geldige boompolygonen gegenereerd.")
