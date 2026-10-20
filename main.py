@@ -105,7 +105,7 @@ if __name__ == "__main__":
     OUTPUT_DIR_NAME = "Output"
     MUNICIPAL_TREES_FILE = "bomen_denhaag_clipped.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
     REF_EXCEL_PATH = "additional_parameters.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
-    WIJK = "Duindorp"
+    WIJK = "duindorp"
     
     # Algorithm parameters
     RADIUS = 2.5              # Search radius
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     print("="*50)
 
     # Zoek alle gegenereerde polygonen GeoPackages in de output map
-    polygon_files = glob.glob(os.path.join(output_dir, "*_polygons.gpkg"))
+    polygon_files = glob.glob(os.path.join(output_dir, f"{WIJK}*_polygons.gpkg"))
 
     if polygon_files:
         gdf_list = []
