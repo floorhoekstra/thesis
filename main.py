@@ -105,7 +105,7 @@ if __name__ == "__main__":
     OUTPUT_DIR_NAME = "Output"
     MUNICIPAL_TREES_FILE = "bomen_denhaag.gpkg"  # Optional: Path to municipal trees file (GPKG or CSV)
     REF_EXCEL_PATH = "additional_parameters.xlsx"  # Optional: Path to Appendix 4 reference table for crown growth model
-    WIJK = "zorgvliet"
+    WIJK = "schildersbuurt"
     
     # Algorithm parameters
     RADIUS = 2.5              # Search radius
